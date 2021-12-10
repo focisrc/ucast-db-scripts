@@ -10,7 +10,7 @@ filename="SMT_data_edit.csv"
 
 def load(month):
   # month: integer representing month of year
-    df = pd.read_csv(filename, error_bad_lines=False,header=0)
+    df = pd.read_csv(filename, error_bad_lines=False,header=0,usecols = ['dateStart','tau'])
     df.index=pd.to_datetime(df.index)
     
     # Filter by hours 8 pm to 3 am
