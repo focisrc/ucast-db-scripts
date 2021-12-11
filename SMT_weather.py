@@ -3,80 +3,95 @@ import numpy as np ,pandas as pd , matplotlib.pyplot as plt
 import scipy as sci
 from scipy import signal
 import os
+from statsmodels.stats.weightstats import DescrStatsW
 
-os.chdir("C:/Users/phaniv/Dropbox/EHT Weather CSV Files")
-print(os.getcwd())
 filename="SMT_data_edit.csv"
 
 def load(month):
   # month: integer representing month of year
     df = pd.read_csv(filename, error_bad_lines=False,header=0,usecols = ['dateStart','tau'])
     df.index=pd.to_datetime(df.index)
-    
     # Filter by hours 8 pm to 3 am
     ndf=df.between_time('20:00','03:00')
     # January
     monthdf =ndf[ndf.index.month == month]
     # First week
     week1df = monthdf[monthdf.index.isocalendar().week==1]
+    
     # monthdf.index=pd.to_datetime(monthdf.index)
     # monthdf.site="SMT"
     week1df["site"]="SMT"
     monthdf["site"]="SMT"
     return week1df,monthdf
  
-def process_month(tau,df):
+def day_stats(tau,df):
     c = df['median'].le(tau)
-    # The main problem with this approach is it breaks when it encounters discontinuous
-    # data  Such as 2:59am , 3:00 am and 10:00 pm as three consecutive rows. The
-    # Average number of nows becomes impossibly high as a result). In other words, if a morning and the next evening have similar opacities,
-    # this just adds it to the time instead of resetting it. 
-    # TODO: Need to fix it by some version of groupby day_select() function
-    s = c.ne(c.shift()).cumsum()
-    u = (s.where(c&s.duplicated(keep=False)).groupby(df['site'],sort=False)
-                                            .agg(['count','nunique','std']))
-    
-    out = (u.join(u['count'].div(u['nunique']).rename("Avg_duration")).reset_index().drop("count",1).rename(columns={"nunique":"Count"}))
-    out.Avg_duration=out.Avg_duration.apply(lambda x: x*24/288)
-    out["tau"]=tau
-    out["std"]=out["std"].apply(lambda x: x*24/288)
-    return (out)
+    lengths=[]
+    for k, g in groupby(c.values):
+            g = list(g)
+            if k==1:
+                lengths.append(len(g))
+    return (np.mean(lengths),np.std(lengths),len(df))
 
 
+def get_split_locs(df):
+    compare_dt= list(df.index)
+    del compare_dt[0]
+    i=0
+    split_list=[]
+    for past,present in zip(a,janwk1.index):
+        if past-present > pd.Timedelta("1 hour"):
+            # print(past,present,past-present)
+            split_list.append(i)
+        i+=1
+    return split_list
 
-def calculate(df,site):
-    taus=np.arange(0,1,0.01)
-    ldf=[process_month(tau,df) for tau in taus]
+def split_df(locs,df):
+    ldf=[]
+    ldf.append(df.iloc[:locs[0],:])
+    print(ldf)
+    for i in range(len(locs)-1):
+        ldf.append(df.iloc[locs[i]:locs[i+1],:])
+    ldf.append(df.iloc[locs[0]:,:])
     return ldf
 
-def plot(ls):
-    e=[float(out["std"]) for out in ls[1:]]
-    print(e)
-    x=[float(out["tau"]) for out in ls[1:]]
-    y=[float(out["Avg_duration"]) for out in ls[1:]]
+def plot(x,y,e):
     plt.xlabel("Tau")
     plt.ylabel("Time(T< Tau) in hours")
-    plt.title("Distribution plot for",ls[0].site[0])
-    plt.xlim(0,0.5)
+    plt.xlim(0,1)
     plt.ylim(0,15)
     plt.errorbar(x, y, yerr = e)
     plt.show()
 
 def rolling_median(df):
     # 12 means 60 minutes as each row is 5 mins
-    df['median']= df['tau'].rolling(pd.Timedelta('60 min')).median()
+    df['median']= df['tau'].rolling(pd.Timedelta('15 min')).median()
 
     return df
 
-# def day_select(defgr):
-#   # returns list of dataframes grouped by date
-#     result = [group[1] for group in defgr.groupby(df.index.date)]
-#     return result
 
 
-janwk1,jan=load(1)
-ls=calculate(janwk1)
-med1jan = rolling_median(janwk1)
-plot(calculate(med1jan))
+week1df,monthdf=load(1)
+loc_list=get_split_locs(week1df)
+df_list=split_df(loc_list,week1df)
+del df_list[-1]
+for day in range(0,len(df_list)):
+    rolling_median(df_list[day])
 
-
+taus=np.arange(0,1.1,0.1)
+stats=dict()
+for tau in taus:
+    stats[tau]=[]
+for day in df_list:
+    for tau in taus:
+        stats[tau].append((day_stats(tau,day)))
+dict_to_df = [(k, *t) for k, v in stats.items() for t in v]
+df = pd.DataFrame(dict_to_df, columns=['tau','mean','sd',"length"]).dropna()
+means=[]
+sds=[]
+for tau in taus:
+    df2=df[df["tau"]==tau]
+    weighted_stats = DescrStatsW(df2["mean"].values, weights=df2["length"].values, ddof=0)
+    means.append(weighted_stats.mean*24/288)
+    sds.append(weighted_stats.std*24/288)
+plot(taus,means,sds)
