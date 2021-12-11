@@ -3,6 +3,7 @@ import numpy as np ,pandas as pd , matplotlib.pyplot as plt
 import scipy as sci
 from scipy import signal
 import os
+from itertools import groupby
 from statsmodels.stats.weightstats import DescrStatsW
 
 filename="SMT_data_edit.csv"
@@ -59,7 +60,7 @@ def plot(x,y,e):
     plt.xlabel("Tau")
     plt.ylabel("Time(T< Tau) in hours")
     plt.xlim(0,1)
-    plt.ylim(0,15)
+    plt.ylim(0,7)
     plt.errorbar(x, y, yerr = e)
     plt.show()
 
