@@ -5,25 +5,22 @@ from scipy import signal
 import os
 from itertools import groupby
 from statsmodels.stats.weightstats import DescrStatsW
-
+TIME_START="20:00"
+TIME_END="03:00"
+FILTER_TIME='15 minutes'
 filename="SMT_data_edit.csv"
-
 def load(month):
   # month: integer representing month of year
+    # Filter by hours 8 pm to 3 am
     df = pd.read_csv(filename, error_bad_lines=False,header=0,usecols = ['dateStart','tau'])
     df.index=pd.to_datetime(df.index)
-    # Filter by hours 8 pm to 3 am
     ndf=df.between_time('20:00','03:00')
     # January
     monthdf =ndf[ndf.index.month == month]
     # First week
     week1df = monthdf[monthdf.index.isocalendar().week==1]
-    
-    # monthdf.index=pd.to_datetime(monthdf.index)
-    # monthdf.site="SMT"
     week1df["site"]="SMT"
-    monthdf["site"]="SMT"
-    return week1df,monthdf
+    return week1df
  
 def day_stats(tau,df):
     # Custom function to solve this sample problem
@@ -33,7 +30,7 @@ def day_stats(tau,df):
     # Process: Gets all the lengths of consecutive numbers less than threshold
     # We need this for the Tau vs time p
     # Returns the mean, standard deviation and length of observing period to account for discrepancies in number of observations
-    c = df['median'].le(tau)
+    c = df['median'].ge(tau)
     lengths=[]
     for k, g in groupby(c.values):
             g = list(g)
@@ -48,7 +45,7 @@ def get_split_locs(df):
     del compare_dt[0]
     i=0
     split_list=[]
-    for past,present in zip(a,janwk1.index):
+    for past,present in zip(compare_dt,df.index):
         if past-present > pd.Timedelta("1 hour"):
             # print(past,present,past-present)
             split_list.append(i)
@@ -68,36 +65,43 @@ def split_df(locs,df):
 
 def plot(x,y,e):
     plt.xlabel("Tau")
-    plt.ylabel("Time(T< Tau) in hours")
-    plt.xlim(0,1)
-    plt.ylim(0,15)
-    plt.errorbar(x, y, yerr = e)
+    plt.ylabel("Time(T> Tau) in hours")
+    plt.title("SMT First week of January ,{}:{}, Tau vs time , medfilter={}".format(TIME_START,TIME_END,FILTER_TIME))
+    plus=[x + y for x, y in zip(means, sds)]
+    minus=[x - y for x, y in zip(means, sds)]
+    plt.plot(taus,plus,label="+std")
+    plt.plot(taus,minus,label="-std")
+    plt.plot(taus,means,label="avg" )
+    plt.yticks(np.arange(0, 9, step=1))
+    plt.xlim(0.05,0.5)
+    plt.axvline(x=0.3,color="red")
+    plt.legend(loc="upper left")
+    plt.grid(True)
     plt.show()
 
 def rolling_median(df):
     # 12 means 60 minutes as each row is 5 mins
-    df['median']= df['tau'].rolling(pd.Timedelta('15 min')).median()
-
+    df['median']= df['tau'].rolling(pd.Timedelta(FILTER_TIME)).median()
     return df
 
 
 # Loading the first week of January and the whole month
 # We only use week1df in the rest of the script , feel free to play around with monthdf ( in this case january df)
-week1df,monthdf=load(1)
+week1df=load(1)
 # We split the dataframe into a list of dataframes with each observing period 
 loc_list=get_split_locs(week1df)
 df_list=split_df(loc_list,week1df)
 
 # Deleting the final df (as it is the whole df and fixes an off by 1 error )
 del df_list[-1]
-# For each observing period 10pm-3 am in this case, we apply a rolling median filter of 15 minutes
+# # For each observing period 10pm-3 am in this case, we apply a rolling median filter of 15 minutes
 for day in range(0,len(df_list)):
     rolling_median(df_list[day])
 
 
 
 # Tau values (Accuracy can be improved by changed 0.1 to 0.01)
-taus=np.arange(0,1.1,0.1)
+taus=np.arange(0,1.1,0.001)
 # Making a dictionary of aggregated statistics for each day
 stats=dict()
 for tau in taus:
@@ -107,7 +111,7 @@ for day in df_list:
         stats[tau].append((day_stats(tau,day)))
 # converting the dictionary to a dataframe
 dict_to_df = [(k, *t) for k, v in stats.items() for t in v]
-df = pd.DataFrame(dict_to_df, columns=['tau','mean','sd',"length"]).dropna()
+df_stats = pd.DataFrame(dict_to_df, columns=['tau','mean','sd',"length"]).dropna()
 
 # TODO: Play around with ddof
 
@@ -116,8 +120,8 @@ df = pd.DataFrame(dict_to_df, columns=['tau','mean','sd',"length"]).dropna()
 means=[]
 sds=[]
 for tau in taus:
-    df2=df[df["tau"]==tau]
-    weighted_stats = DescrStatsW(df2["mean"].values, weights=df2["length"].values, ddof=0)
+    df2=df_stats[df_stats["tau"]==tau]
+    weighted_stats = DescrStatsW(df2["mean"].values, weights=list(df2["length"].values), ddof=0)
     # We divide it by 12 as data is collected every 5 minutes ( 12*5=60 min = 1hour)
     means.append(weighted_stats.mean/12)
     sds.append(weighted_stats.std/12)
